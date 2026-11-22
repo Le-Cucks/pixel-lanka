@@ -49,7 +49,8 @@ P = {k: hexc(v) for k, v in {
     "pool": "#5fc4d8", "road": "#5f5d5a", "major": "#514f4c", "curb": "#8c877b",
     "foot": "#cbbd9c", "ballast": "#8a7b6a", "rail": "#3b3530", "trunk": "#5a4030",
     "tree0": "#2f5e2e", "tree1": "#44803a", "tree2": "#6aa84f", "outline": "#2a2724",
-    "dash": "#e8e2cf",
+    "dash": "#e8e2cf", "forest": "#3f7a3a", "crop": "#a6bf6a", "shrub": "#8fa85a",
+    "wetland": "#6f9e86", "mangrove": "#2f6b55", "barren": "#cbb994",
 }.items()}
 
 WALLS = [hexc(h) for h in ("#ece5d3", "#f3f0e7", "#e8c9a0", "#dcbab1", "#c9d8c0",
@@ -83,12 +84,13 @@ def polys(g):
 class Frame:
     """Local metre grid (east, north) centred on the area's bbox."""
 
-    def __init__(self, bbox, px):
-        xmin, ymin, xmax, ymax = bbox
-        self.lon0, self.lat0 = (xmin + xmax) / 2, (ymin + ymax) / 2
+    def __init__(self, bbox, px, frame=None):
+        fx0, fy0, fx1, fy1 = frame or bbox
+        self.lon0, self.lat0 = (fx0 + fx1) / 2, (fy0 + fy1) / 2
         self.mx = 111320 * math.cos(math.radians(self.lat0))
         self.my = 110574.0
         self.px = px
+        xmin, ymin, xmax, ymax = bbox
         self.clip = box(*self.en(xmin, ymin), *self.en(xmax, ymax))
 
     def en(self, lon, lat):
@@ -97,13 +99,16 @@ class Frame:
     def to_m(self, g):
         return shapely.transform(g, lambda a: (a - [self.lon0, self.lat0]) * [self.mx, self.my])
 
+    def to_ll(self, e, n):
+        return self.lon0 + e / self.mx, self.lat0 + n / self.my
+
     def ring(self, coords, z=0.0):
         return [self.xy(c[0], c[1], z) for c in coords]
 
 
 class Iso(Frame):
-    def __init__(self, bbox, px, max_h):
-        super().__init__(bbox, px)
+    def __init__(self, bbox, px, max_h, frame=None):
+        super().__init__(bbox, px, frame)
         self.ox = self.oy = 0
         pts = [self.xy(x, y) for x, y in self.clip.exterior.coords]
         margin = 16
@@ -131,6 +136,8 @@ class TopDown(Frame):
 
 
 def load(con, area, layer):
+    if not Path(f"data/{area}/{layer}.parquet").exists():
+        return
     cur = con.execute(
         f"SELECT * EXCLUDE geometry, ST_AsWKB(geometry) AS g FROM 'data/{area}/{layer}.parquet'")
     cols = [d[0] for d in cur.description]
@@ -193,7 +200,7 @@ def draw_building(d, iso, poly, h, s):
         t = ((nx - ny) * C + 1) / 2
         col = mix(mul(s["wall"], 0.66), s["wall"], t)
         d.polygon([iso.xy(x1, y1), iso.xy(x2, y2), iso.xy(x2, y2, h), iso.xy(x1, y1, h)], fill=col)
-        if h < 5 or L < 2.5 or s.get("nowin"):
+        if h < 5 or L < 2.5 or s.get("nowin") or iso.px < 1:
             continue
         win = mix(mul(s["win"], 0.8), s["win"], t)
         n = int(L / 2.6)
@@ -231,25 +238,34 @@ def draw_tree(d, iso, e, n, key):
 
 
 class GroundLayers:
-    """Ground features loaded once in metres, with spatial indexes for drawing any sub-area."""
+    """Ground features in metres with spatial indexes; source(layer) yields feature dicts."""
 
-    ORDER = ("land", "beach", "grass", "park", "lake", "foot", "curb", "road", "major", "ballast")
+    ORDER = ("land", "crop", "shrub", "forest", "wetland", "mangrove", "barren", "beach", "grass", "park",
+             "lake", "foot", "curb", "road", "major", "ballast")
+    COVER = {"crop": "crop", "shrub": "shrub", "forest": "forest", "wetland": "wetland",
+             "mangrove": "mangrove", "barren": "barren", "grass": "grass"}
 
-    def __init__(self, con, area, frame):
+    def __init__(self, frame, source):
         clip = frame.clip
         L = {k: [] for k in (*self.ORDER, "pool", "rail")}
-        for f in load(con, area, "land"):
+        for f in source("land"):
             key = GROUND.get((f["subtype"], f["class"]))
             if key:
                 L[key].append(frame.to_m(f["g"]).intersection(clip))
-        for f in load(con, area, "land_use"):
+        for f in source("land_cover"):
+            key = self.COVER.get(f["subtype"])
+            if key and (f["max_zoom"] or 0) >= 15:
+                L[key].append(frame.to_m(f["g"]).intersection(clip))
+        for f in source("land_use"):
             if f["class"] in LANDUSE_GREEN:
                 L["grass"].append(frame.to_m(f["g"]).intersection(clip))
-        for f in load(con, area, "water"):
+            elif f["class"] in ("farmland", "paddy", "orchard", "plantation"):
+                L["crop"].append(frame.to_m(f["g"]).intersection(clip))
+        for f in source("water"):
             if f["class"] not in ("ocean", "sea"):
                 key = "pool" if f["class"] == "swimming_pool" else "lake"
                 L[key].append(frame.to_m(f["g"]).intersection(clip))
-        for f in load(con, area, "roads"):
+        for f in source("roads"):
             g = frame.to_m(f["g"]).intersection(clip)
             if g.is_empty:
                 continue
@@ -273,8 +289,20 @@ class GroundLayers:
         return [geoms[i].intersection(clip) for i in self.trees[key].query(clip)]
 
 
-def draw_ground(img, proj, ground):
-    """Ocean, land cover, water, roads and rail inside proj.clip, through any Frame projection."""
+WAVES = np.random.default_rng(7).random((256, 256)) < 0.0015
+SPECKLE = np.tile(np.random.default_rng(11).random((64, 64)), (4, 4))
+
+
+def tiled(pattern, shape, phase):
+    py, px = phase
+    reps = (math.ceil((shape[0] + py) / 256), math.ceil((shape[1] + px) / 256))
+    return np.tile(pattern, reps)[py: py + shape[0], px: px + shape[1]]
+
+
+def draw_ground(img, proj, ground, phase=(0, 0)):
+    """Ocean, land cover, water, roads and rail inside proj.clip, through any Frame projection.
+
+    phase is the (row, col) offset of img inside the full image modulo 256, so textures line up across tiles."""
     clip = proj.clip
     fill(img, proj, [clip], P["ocean"])
     ocean = np.array(img)
@@ -285,17 +313,21 @@ def draw_ground(img, proj, ground):
         for line in getattr(r, "geoms", [r]):
             if line.geom_type != "LineString":
                 continue
-            for off in (-0.75, 0.75):
-                o = line.offset_curve(off)
+            for off in ((-0.75, 0.75) if proj.px >= 1 else (0,)):
+                o = line.offset_curve(off) if off else line
                 for part in getattr(o, "geoms", [o]):
                     if len(part.coords) > 1:
                         d.line(proj.ring(part.coords), fill=P["rail"])
     fill(img, proj, ground.get("pool", clip), P["pool"])
 
     arr = np.array(img)
+    speck = tiled(SPECKLE, arr.shape[:2], phase)
+    for key, dark, light in (("forest", 0.12, 0.06), ("mangrove", 0.12, 0.04), ("crop", 0.05, 0.05)):
+        m = (arr == P[key]).all(-1)
+        arr[m & (speck < dark)] = mul(P[key], 0.82)
+        arr[m & (speck > 1 - light)] = mul(P[key], 1.12)
     sea = (ocean == P["ocean"]).all(-1) & (arr == P["ocean"]).all(-1)
-    rng = np.random.default_rng(7)
-    waves = sea & (rng.random(sea.shape) < 0.0015)
+    waves = sea & tiled(WAVES, sea.shape, phase)
     for dx in range(3):
         arr[:, dx:][waves[:, : arr.shape[1] - dx]] = P["wave"]
     return Image.fromarray(arr)
@@ -317,7 +349,7 @@ def render(area, px):
     iso = Iso(AREAS[area], px, max(h for _, h, _ in buildings))
     clip = iso.clip
 
-    img = draw_ground(Image.new("RGB", (iso.w, iso.h), P["bg"]), iso, GroundLayers(con, area, iso))
+    img = draw_ground(Image.new("RGB", (iso.w, iso.h), P["bg"]), iso, GroundLayers(iso, lambda layer: load(con, area, layer)))
 
     shadows = []
     for p, h, _ in buildings:

@@ -3,30 +3,35 @@
 import Link from 'next/link';
 import OpenSeadragon from 'openseadragon';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatAt, inBounds, parseAt, toImage, toLonLat, type Meta } from '@/lib/geo';
+import { baseLayer, formatAt, inBounds, parseAt, placement, toImage, toLonLat, type MapLayer, type World } from '@/lib/geo';
 import Search, { type Place } from './Search';
 
-const TILES = `${process.env.NEXT_PUBLIC_TILES_BASE ?? '/tiles'}/colombo`;
-const PLACE_ZOOM = 1.5; // screen pixels per image pixel when jumping to a place
+const TILES = process.env.NEXT_PUBLIC_TILES_BASE ?? '/tiles';
+const DETAIL_PIXELS = 1.5; // screen pixels per pixel of the most detailed map covering a place
 
 export default function MapViewer() {
   const el = useRef<HTMLDivElement>(null);
   const viewer = useRef<OpenSeadragon.Viewer | null>(null);
   const pin = useRef<HTMLDivElement | null>(null);
-  const [meta, setMeta] = useState<Meta | null>(null);
+  const [world, setWorld] = useState<World | null>(null);
   const [toast, setToast] = useState('');
 
   useEffect(() => {
     let v: OpenSeadragon.Viewer | undefined;
     let cancelled = false;
-    fetch(`${TILES}/meta.json`)
+    fetch(`${TILES}/world.json`)
       .then((r) => r.json())
-      .then((m: Meta) => {
+      .then((w: World) => {
         if (cancelled || !el.current) return;
-        setMeta(m);
+        setWorld(w);
+        const base = baseLayer(w);
+        const overlays = Object.values(w.maps).filter((m) => m !== base);
         v = OpenSeadragon({
           element: el.current,
-          tileSources: `${TILES}/${m.dzi}`,
+          tileSources: [
+            { tileSource: `${TILES}/${base.dzi}` },
+            ...overlays.map((m) => ({ tileSource: `${TILES}/${m.dzi}`, ...placement(base, m) })),
+          ],
           showNavigationControl: false,
           showNavigator: true,
           navigatorPosition: 'BOTTOM_RIGHT',
@@ -43,19 +48,21 @@ export default function MapViewer() {
         v.addOnceHandler('open', () => {
           const vp = v!.viewport;
           const at = parseAt(new URLSearchParams(location.search).get('at'));
-          if (at && inBounds(m, at.lon, at.lat)) {
-            const p = toImage(m, at.lon, at.lat);
+          const start = Object.values(w.maps).find((m) => m.start)?.start;
+          if (at && inBounds(base, at.lon, at.lat)) {
+            const p = toImage(w.frame, base, at.lon, at.lat);
             vp.panTo(vp.imageToViewportCoordinates(p.x, p.y), true);
             vp.zoomTo(at.zoom, undefined, true);
-          } else if (m.start) {
-            vp.panTo(vp.imageToViewportCoordinates(m.start.x, m.start.y), true);
-            vp.zoomTo(vp.imageToViewportZoom(0.5), undefined, true);
+          } else if (start) {
+            const p = toImage(w.frame, base, start.lon, start.lat);
+            vp.panTo(vp.imageToViewportCoordinates(p.x, p.y), true);
+            vp.zoomTo(vp.imageToViewportZoom(detailRatio(w, base, start.lon, start.lat) / 3), undefined, true);
           }
         });
         v.addHandler('animation-finish', () => {
           const vp = v!.viewport;
           const c = vp.viewportToImageCoordinates(vp.getCenter(true));
-          const ll = toLonLat(m, c.x, c.y);
+          const ll = toLonLat(w.frame, base, c.x, c.y);
           history.replaceState(null, '', `?at=${formatAt(ll.lat, ll.lon, vp.getZoom(true))}`);
         });
       });
@@ -66,19 +73,21 @@ export default function MapViewer() {
     };
   }, []);
 
-  const flyTo = useCallback((x: number, y: number) => {
+  const flyTo = useCallback((lon: number, lat: number) => {
     const v = viewer.current;
-    if (!v) return;
+    if (!v || !world) return;
+    const base = baseLayer(world);
     const vp = v.viewport;
-    const point = vp.imageToViewportCoordinates(x, y);
+    const p = toImage(world.frame, base, lon, lat);
+    const point = vp.imageToViewportCoordinates(p.x, p.y);
     vp.panTo(point);
-    vp.zoomTo(vp.imageToViewportZoom(PLACE_ZOOM));
+    vp.zoomTo(vp.imageToViewportZoom(detailRatio(world, base, lon, lat)));
     if (pin.current) v.removeOverlay(pin.current);
     const div = document.createElement('div');
     div.className = 'pin';
     pin.current = div;
     v.addOverlay({ element: div, location: point, placement: OpenSeadragon.Placement.BOTTOM });
-  }, []);
+  }, [world]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -86,10 +95,9 @@ export default function MapViewer() {
   };
 
   const onLatLon = (lat: number, lon: number) => {
-    if (!meta) return;
-    if (!inBounds(meta, lon, lat)) return flash('That point is outside the map (Colombo city only, for now)');
-    const p = toImage(meta, lon, lat);
-    flyTo(p.x, p.y);
+    if (!world) return;
+    if (!inBounds(baseLayer(world), lon, lat)) return flash('That point is outside the map of Sri Lanka');
+    flyTo(lon, lat);
   };
 
   const share = async () => {
@@ -103,22 +111,32 @@ export default function MapViewer() {
 
   return (
     <>
-      <div ref={el} className="map" role="application" aria-label="Map of Colombo. Drag to move, scroll or pinch to zoom." />
+      <div ref={el} className="map" role="application" aria-label="Map of Sri Lanka. Drag to move, scroll or pinch to zoom." />
       <header className="brand">
         <Link className="logo chip" href="/" aria-label="Pixel Lanka, whole map"
           onClick={(e) => { e.preventDefault(); viewer.current?.viewport.goHome(); }}>
           <span className="logo-en">Pixel Lanka</span>
-          <span className="logo-local"><span lang="si">කොළඹ</span> · <span lang="ta">கொழும்பு</span></span>
+          <span className="logo-local"><span lang="si">ශ්‍රී ලංකා</span> · <span lang="ta">இலங்கை</span></span>
         </Link>
       </header>
       <div className="topright">
-        <Search placesUrl={`${TILES}/places.json`} onPlace={(p: Place) => flyTo(p[2], p[3])} onLatLon={onLatLon} />
+        <Search
+          placesUrls={world ? Object.values(world.maps).map((m) => `${TILES}/${m.places}`) : []}
+          onPlace={(p: Place) => flyTo(p[2], p[3])}
+          onLatLon={onLatLon}
+        />
         <button className="chip share" onClick={share}>Share this view</button>
       </div>
       <div className="credit chip">
-        © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://overturemaps.org">Overture Maps</a> · Google Open Buildings · Microsoft
+        © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://overturemaps.org">Overture Maps</a> · Google Open Buildings · Microsoft · ESA WorldCover
       </div>
       {toast && <div className="toast chip" role="status">{toast}</div>}
     </>
   );
+}
+
+// Zoom (in base-image pixels per screen pixel) that shows the most detailed map at a point crisply.
+function detailRatio(w: World, base: MapLayer, lon: number, lat: number) {
+  const px = Math.max(...Object.values(w.maps).filter((m) => inBounds(m, lon, lat)).map((m) => m.px), base.px);
+  return (DETAIL_PIXELS * px) / base.px;
 }
