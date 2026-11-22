@@ -9,7 +9,7 @@ import duckdb
 import numpy as np
 from PIL import Image, ImageDraw
 import shapely
-from shapely import wkb
+from shapely import STRtree, wkb
 from shapely.affinity import translate
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
 from shapely.geometry.polygon import orient
@@ -118,8 +118,10 @@ class Iso(Frame):
 
 
 class TopDown(Frame):
-    def __init__(self, bbox, px):
+    def __init__(self, bbox, px, clip=None):
         super().__init__(bbox, px)
+        if clip is not None:
+            self.clip = clip
         self.x0, self.y0, self.x1, self.y1 = self.clip.bounds
         self.w = math.ceil((self.x1 - self.x0) * px)
         self.h = math.ceil((self.y1 - self.y0) * px)
@@ -228,61 +230,67 @@ def draw_tree(d, iso, e, n, key):
     d.ellipse([cx - rx * 0.5, cy - ry * 0.8, cx + rx * 0.05, cy - ry * 0.2], fill=P["tree2"])
 
 
-def draw_ground(img, iso, con, area):
-    """Ocean, land cover, water, roads and rail, drawn through any Frame projection."""
-    clip = iso.clip
-    fill(img, iso, [clip], P["ocean"])
+class GroundLayers:
+    """Ground features loaded once in metres, with spatial indexes for drawing any sub-area."""
+
+    ORDER = ("land", "beach", "grass", "park", "lake", "foot", "curb", "road", "major", "ballast")
+
+    def __init__(self, con, area, frame):
+        clip = frame.clip
+        L = {k: [] for k in (*self.ORDER, "pool", "rail")}
+        for f in load(con, area, "land"):
+            key = GROUND.get((f["subtype"], f["class"]))
+            if key:
+                L[key].append(frame.to_m(f["g"]).intersection(clip))
+        for f in load(con, area, "land_use"):
+            if f["class"] in LANDUSE_GREEN:
+                L["grass"].append(frame.to_m(f["g"]).intersection(clip))
+        for f in load(con, area, "water"):
+            if f["class"] not in ("ocean", "sea"):
+                key = "pool" if f["class"] == "swimming_pool" else "lake"
+                L[key].append(frame.to_m(f["g"]).intersection(clip))
+        for f in load(con, area, "roads"):
+            g = frame.to_m(f["g"]).intersection(clip)
+            if g.is_empty:
+                continue
+            if f["subtype"] == "rail":
+                L["rail"].append(g)
+                L["ballast"].append(g.buffer(2.2, 4))
+                continue
+            w = ROAD_W.get(f["class"])
+            if not w:
+                continue
+            if f["class"] in FOOT:
+                L["foot"].append(g.buffer(w / 2, 4))
+            else:
+                L["curb"].append(g.buffer(w / 2 + 1, 4))
+                L["major" if f["class"] in MAJOR else "road"].append(g.buffer(w / 2, 4))
+        self.layers = {k: [g for g in v if not g.is_empty] for k, v in L.items()}
+        self.trees = {k: STRtree(v) for k, v in self.layers.items()}
+
+    def get(self, key, clip):
+        geoms = self.layers[key]
+        return [geoms[i].intersection(clip) for i in self.trees[key].query(clip)]
+
+
+def draw_ground(img, proj, ground):
+    """Ocean, land cover, water, roads and rail inside proj.clip, through any Frame projection."""
+    clip = proj.clip
+    fill(img, proj, [clip], P["ocean"])
     ocean = np.array(img)
-
-    ground = {}
-    for f in load(con, area, "land"):
-        key = GROUND.get((f["subtype"], f["class"]))
-        g = iso.to_m(f["g"]).intersection(clip)
-        if key and not g.is_empty:
-            ground.setdefault(key, []).append(g)
-    for f in load(con, area, "land_use"):
-        if f["class"] in LANDUSE_GREEN:
-            ground.setdefault("grass", []).append(iso.to_m(f["g"]).intersection(clip))
-    for key in ("land", "beach", "grass", "park"):
-        fill(img, iso, ground.get(key, []), P[key])
-
-    water = {"lake": [], "pool": []}
-    for f in load(con, area, "water"):
-        if f["class"] in ("ocean", "sea"):
-            continue
-        g = iso.to_m(f["g"]).intersection(clip)
-        water["pool" if f["class"] == "swimming_pool" else "lake"].append(g)
-    fill(img, iso, water["lake"], P["lake"])
-
-    curbs, roads, majors, foots, rails = [], [], [], [], []
-    for f in load(con, area, "roads"):
-        g = iso.to_m(f["g"]).intersection(clip)
-        if g.is_empty:
-            continue
-        if f["subtype"] == "rail":
-            rails.append(g)
-            continue
-        w = ROAD_W.get(f["class"])
-        if not w:
-            continue
-        if f["class"] in FOOT:
-            foots.append(g.buffer(w / 2, 4))
-        else:
-            curbs.append(g.buffer(w / 2 + 1, 4))
-            (majors if f["class"] in MAJOR else roads).append(g.buffer(w / 2, 4))
-    fill(img, iso, foots, P["foot"])
-    fill(img, iso, curbs, P["curb"])
-    fill(img, iso, roads, P["road"])
-    fill(img, iso, majors, P["major"])
-    fill(img, iso, [r.buffer(2.2, 4) for r in rails], P["ballast"])
+    for key in GroundLayers.ORDER:
+        fill(img, proj, ground.get(key, clip), P[key])
     d = ImageDraw.Draw(img)
-    for r in rails:
+    for r in ground.get("rail", clip):
         for line in getattr(r, "geoms", [r]):
+            if line.geom_type != "LineString":
+                continue
             for off in (-0.75, 0.75):
                 o = line.offset_curve(off)
                 for part in getattr(o, "geoms", [o]):
-                    d.line(iso.ring(part.coords), fill=P["rail"])
-    fill(img, iso, water["pool"], P["pool"])
+                    if len(part.coords) > 1:
+                        d.line(proj.ring(part.coords), fill=P["rail"])
+    fill(img, proj, ground.get("pool", clip), P["pool"])
 
     arr = np.array(img)
     sea = (ocean == P["ocean"]).all(-1) & (arr == P["ocean"]).all(-1)
@@ -309,7 +317,7 @@ def render(area, px):
     iso = Iso(AREAS[area], px, max(h for _, h, _ in buildings))
     clip = iso.clip
 
-    img = draw_ground(Image.new("RGB", (iso.w, iso.h), P["bg"]), iso, con, area)
+    img = draw_ground(Image.new("RGB", (iso.w, iso.h), P["bg"]), iso, GroundLayers(con, area, iso))
 
     shadows = []
     for p, h, _ in buildings:

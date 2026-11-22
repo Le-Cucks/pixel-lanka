@@ -164,22 +164,23 @@ function treeMeshes(trees) {
   return [canopy, trunk];
 }
 
-export function buildCity(data, groundTex) {
+export function groundPlane(bounds, tex, y = 0) {
+  const [x0, y0, x1, y1] = bounds;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), new THREE.MeshLambertMaterial({ map: tex }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set((x0 + x1) / 2, y, -(y0 + y1) / 2);
+  m.receiveShadow = true;
+  return m;
+}
+
+export function buildChunk(data, groundTex) {
   const group = new THREE.Group();
-  const [x0, y0, x1, y1] = data.bounds;
-  groundTex.colorSpace = THREE.SRGBColorSpace;
-  groundTex.magFilter = THREE.NearestFilter;
-  groundTex.anisotropy = 8;
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0),
-    new THREE.MeshLambertMaterial({ map: groundTex }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set((x0 + x1) / 2, 0, -(y0 + y1) / 2);
-  ground.receiveShadow = true;
-  const ocean = new THREE.Mesh(new THREE.PlaneGeometry(40000, 40000),
-    new THREE.MeshLambertMaterial({ color: data.ocean }));
-  ocean.rotation.x = -Math.PI / 2;
-  ocean.position.y = -0.3;
-  group.add(ground, ocean, ...buildingMeshes(data.buildings), ...treeMeshes(data.trees));
+  group.add(groundPlane(data.bounds, groundTex));
+  if (data.buildings.length) group.add(...buildingMeshes(data.buildings));
+  if (data.trees.length) group.add(...treeMeshes(data.trees));
   return group;
 }
 
@@ -193,11 +194,10 @@ function inside(p, e, n) {
 }
 
 export class Collider {
-  constructor(data, cell = 25) {
+  constructor(buildings, cell = 25) {
     this.cell = cell;
     this.grid = new Map();
-    this.bounds = data.bounds;
-    this.boxes = data.buildings.map((b, i) => {
+    this.boxes = buildings.map((b, i) => {
       let a = Infinity, c = Infinity, d = -Infinity, e = -Infinity;
       for (let k = 0; k < b.p.length; k += 2) {
         a = Math.min(a, b.p[k]); c = Math.min(c, b.p[k + 1]);
@@ -215,8 +215,6 @@ export class Collider {
 
   hit(x, z, r = 0.3) {
     const e = x, n = -z;
-    const [x0, y0, x1, y1] = this.bounds;
-    if (e < x0 || e > x1 || n < y0 || n > y1) return true;
     for (const [pe, pn] of [[e, n], [e + r, n], [e - r, n], [e, n + r], [e, n - r]]) {
       const list = this.grid.get(Math.floor(pe / this.cell) + ',' + Math.floor(pn / this.cell));
       if (!list) continue;
