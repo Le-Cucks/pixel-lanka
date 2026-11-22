@@ -80,21 +80,16 @@ def polys(g):
     return []
 
 
-class Iso:
-    def __init__(self, bbox, px, max_h):
+class Frame:
+    """Local metre grid (east, north) centred on the area's bbox."""
+
+    def __init__(self, bbox, px):
         xmin, ymin, xmax, ymax = bbox
         self.lon0, self.lat0 = (xmin + xmax) / 2, (ymin + ymax) / 2
         self.mx = 111320 * math.cos(math.radians(self.lat0))
         self.my = 110574.0
         self.px = px
-        self.ox = self.oy = 0
         self.clip = box(*self.en(xmin, ymin), *self.en(xmax, ymax))
-        pts = [self.xy(x, y) for x, y in self.clip.exterior.coords]
-        margin = 16
-        self.ox = min(p[0] for p in pts) - margin
-        self.oy = min(p[1] for p in pts) - max_h * ZK * px - margin
-        self.w = round(max(p[0] for p in pts) - self.ox + margin)
-        self.h = round(max(p[1] for p in pts) - self.oy + margin)
 
     def en(self, lon, lat):
         return (lon - self.lon0) * self.mx, (lat - self.lat0) * self.my
@@ -102,12 +97,35 @@ class Iso:
     def to_m(self, g):
         return shapely.transform(g, lambda a: (a - [self.lon0, self.lat0]) * [self.mx, self.my])
 
+    def ring(self, coords, z=0.0):
+        return [self.xy(c[0], c[1], z) for c in coords]
+
+
+class Iso(Frame):
+    def __init__(self, bbox, px, max_h):
+        super().__init__(bbox, px)
+        self.ox = self.oy = 0
+        pts = [self.xy(x, y) for x, y in self.clip.exterior.coords]
+        margin = 16
+        self.ox = min(p[0] for p in pts) - margin
+        self.oy = min(p[1] for p in pts) - max_h * ZK * px - margin
+        self.w = round(max(p[0] for p in pts) - self.ox + margin)
+        self.h = round(max(p[1] for p in pts) - self.oy + margin)
+
     def xy(self, e, n, z=0.0):
         return ((e - n) * C * self.px - self.ox,
                 (-(e + n) * C * 0.5 - z * ZK) * self.px - self.oy)
 
-    def ring(self, coords, z=0.0):
-        return [self.xy(c[0], c[1], z) for c in coords]
+
+class TopDown(Frame):
+    def __init__(self, bbox, px):
+        super().__init__(bbox, px)
+        self.x0, self.y0, self.x1, self.y1 = self.clip.bounds
+        self.w = math.ceil((self.x1 - self.x0) * px)
+        self.h = math.ceil((self.y1 - self.y0) * px)
+
+    def xy(self, e, n, z=0.0):
+        return (e - self.x0) * self.px, (self.y1 - n) * self.px
 
 
 def load(con, area, layer):
@@ -210,23 +228,9 @@ def draw_tree(d, iso, e, n, key):
     d.ellipse([cx - rx * 0.5, cy - ry * 0.8, cx + rx * 0.05, cy - ry * 0.2], fill=P["tree2"])
 
 
-def render(area, px):
-    con = duckdb.connect()
-    con.execute("LOAD spatial")
-    tmp = Iso(AREAS[area], px, 0)
-
-    buildings = []
-    for b in load(con, area, "buildings"):
-        g = tmp.to_m(b["g"])
-        if not tmp.clip.contains(g.centroid):
-            continue
-        for p in polys(g):
-            h = building_height(b, p)
-            buildings.append((p, h, building_style(b, p, h)))
-    iso = Iso(AREAS[area], px, max(h for _, h, _ in buildings))
+def draw_ground(img, iso, con, area):
+    """Ocean, land cover, water, roads and rail, drawn through any Frame projection."""
     clip = iso.clip
-
-    img = Image.new("RGB", (iso.w, iso.h), P["bg"])
     fill(img, iso, [clip], P["ocean"])
     ocean = np.array(img)
 
@@ -280,6 +284,33 @@ def render(area, px):
                     d.line(iso.ring(part.coords), fill=P["rail"])
     fill(img, iso, water["pool"], P["pool"])
 
+    arr = np.array(img)
+    sea = (ocean == P["ocean"]).all(-1) & (arr == P["ocean"]).all(-1)
+    rng = np.random.default_rng(7)
+    waves = sea & (rng.random(sea.shape) < 0.0015)
+    for dx in range(3):
+        arr[:, dx:][waves[:, : arr.shape[1] - dx]] = P["wave"]
+    return Image.fromarray(arr)
+
+
+def render(area, px):
+    con = duckdb.connect()
+    con.execute("LOAD spatial")
+    tmp = Iso(AREAS[area], px, 0)
+
+    buildings = []
+    for b in load(con, area, "buildings"):
+        g = tmp.to_m(b["g"])
+        if not tmp.clip.contains(g.centroid):
+            continue
+        for p in polys(g):
+            h = building_height(b, p)
+            buildings.append((p, h, building_style(b, p, h)))
+    iso = Iso(AREAS[area], px, max(h for _, h, _ in buildings))
+    clip = iso.clip
+
+    img = draw_ground(Image.new("RGB", (iso.w, iso.h), P["bg"]), iso, con, area)
+
     shadows = []
     for p, h, _ in buildings:
         sh = min(h, 90)
@@ -290,11 +321,6 @@ def render(area, px):
     arr = np.array(img)
     arr[mask] = (arr[mask] * np.array([0.66, 0.68, 0.76])).astype(np.uint8)
 
-    sea = (ocean == P["ocean"]).all(-1) & (arr == P["ocean"]).all(-1)
-    rng = np.random.default_rng(7)
-    waves = sea & (rng.random(sea.shape) < 0.0015)
-    for dx in range(3):
-        arr[:, dx:][waves[:, : arr.shape[1] - dx]] = P["wave"]
     img = Image.fromarray(arr)
     d = ImageDraw.Draw(img)
 
