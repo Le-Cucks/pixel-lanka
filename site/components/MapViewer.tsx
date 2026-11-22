@@ -8,6 +8,15 @@ import { LandmarkCard, LandmarkStrip, type Landmark } from './Landmarks';
 import Search, { type Place } from './Search';
 
 const TILES = process.env.NEXT_PUBLIC_TILES_BASE ?? '/tiles';
+// With several images open, viewport-level conversions are inaccurate; convert through the base image.
+function baseItem(v: OpenSeadragon.Viewer, base: MapLayer) {
+  for (let i = 0; i < v.world.getItemCount(); i++) {
+    const it = v.world.getItemAt(i);
+    if (it.getContentSize().x === base.width) return it;
+  }
+  return v.world.getItemAt(0);
+}
+
 const DETAIL_PIXELS = 1.5; // screen pixels per pixel of the most detailed map covering a place
 
 export default function MapViewer() {
@@ -43,6 +52,7 @@ export default function MapViewer() {
           showNavigator: true,
           navigatorPosition: 'BOTTOM_RIGHT',
           navigatorSizeRatio: 0.16,
+          drawer: 'canvas', // the WebGL drawer mis-blends transparent overlay tiles
           imageSmoothingEnabled: false,
           maxZoomPixelRatio: 6,
           minZoomImageRatio: 0.9,
@@ -54,21 +64,22 @@ export default function MapViewer() {
         viewer.current = v;
         v.addOnceHandler('open', () => {
           const vp = v!.viewport;
+          const img = baseItem(v!, base);
           const at = parseAt(new URLSearchParams(location.search).get('at'));
           const start = Object.values(w.maps).find((m) => m.start)?.start;
           if (at && inBounds(base, at.lon, at.lat)) {
             const p = toImage(w.frame, base, at.lon, at.lat);
-            vp.panTo(vp.imageToViewportCoordinates(p.x, p.y), true);
+            vp.panTo(img.imageToViewportCoordinates(p.x, p.y), true);
             vp.zoomTo(at.zoom, undefined, true);
           } else if (start) {
             const p = toImage(w.frame, base, start.lon, start.lat);
-            vp.panTo(vp.imageToViewportCoordinates(p.x, p.y), true);
-            vp.zoomTo(vp.imageToViewportZoom(detailRatio(w, base, start.lon, start.lat) / 3), undefined, true);
+            vp.panTo(img.imageToViewportCoordinates(p.x, p.y), true);
+            vp.zoomTo(img.imageToViewportZoom(detailRatio(w, base, start.lon, start.lat) / 3), undefined, true);
           }
         });
         v.addHandler('animation-finish', () => {
           const vp = v!.viewport;
-          const c = vp.viewportToImageCoordinates(vp.getCenter(true));
+          const c = baseItem(v!, base).viewportToImageCoordinates(vp.getCenter(true));
           const ll = toLonLat(w.frame, base, c.x, c.y);
           history.replaceState(null, '', `?at=${formatAt(ll.lat, ll.lon, vp.getZoom(true))}`);
         });
@@ -86,9 +97,10 @@ export default function MapViewer() {
     const base = baseLayer(world);
     const vp = v.viewport;
     const p = toImage(world.frame, base, lon, lat);
-    const point = vp.imageToViewportCoordinates(p.x, p.y);
+    const img = baseItem(v, base);
+    const point = img.imageToViewportCoordinates(p.x, p.y);
     vp.panTo(point);
-    vp.zoomTo(vp.imageToViewportZoom(detailRatio(world, base, lon, lat)));
+    vp.zoomTo(img.imageToViewportZoom(detailRatio(world, base, lon, lat)));
     if (pin.current) v.removeOverlay(pin.current);
     const div = document.createElement('div');
     div.className = 'pin';
