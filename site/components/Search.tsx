@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseLatLon } from '@/lib/geo';
 
-export type Place = [name: string, category: string, x: number, y: number, score: number];
+export type Place = [name: string, category: string, lon: number, lat: number, score: number];
 
 type Props = {
-  placesUrl: string;
+  placesUrls: string[];
+  extra?: Place[]; // curated entries ranked above everything else
   onPlace: (p: Place) => void;
   onLatLon: (lat: number, lon: number) => void;
 };
 
-export default function Search({ placesUrl, onPlace, onLatLon }: Props) {
+export default function Search({ placesUrls, extra = [], onPlace, onLatLon }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [places, setPlaces] = useState<Place[] | null>(null);
   const [q, setQ] = useState('');
@@ -30,7 +31,16 @@ export default function Search({ placesUrl, onPlace, onLatLon }: Props) {
   }, []);
 
   const load = () => {
-    if (!places) fetch(placesUrl).then((r) => r.json()).then(setPlaces);
+    if (places) return;
+    Promise.all(placesUrls.map((u) => fetch(u).then((r) => r.json() as Promise<Place[]>))).then((lists) => {
+      const seen = new Set<string>();
+      const merged: Place[] = [];
+      for (const p of lists.flat().sort((a, b) => b[4] - a[4])) {
+        const key = `${p[0].toLowerCase()}|${p[2].toFixed(3)}|${p[3].toFixed(3)}`;
+        if (!seen.has(key)) { seen.add(key); merged.push(p); }
+      }
+      setPlaces([...extra, ...merged]);
+    });
   };
 
   const latLon = parseLatLon(q);

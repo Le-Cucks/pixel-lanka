@@ -11,6 +11,7 @@ BASE = f"s3://overturemaps-us-west-2/release/{RELEASE}"
 AREAS = {
     "colombo-fort": (79.838, 6.924, 79.861, 6.944),
     "colombo": (79.835, 6.860, 79.900, 6.985),
+    "sri-lanka": (79.50, 5.88, 81.92, 9.86),
 }
 
 LAYERS = {
@@ -29,6 +30,10 @@ LAYERS = {
     "water": ("theme=base/type=water", "id, subtype, class, geometry"),
     "land_use": ("theme=base/type=land_use", "id, subtype, class, geometry"),
     "land": ("theme=base/type=land", "id, subtype, class, geometry"),
+    "land_cover": (
+        "theme=base/type=land_cover",
+        "id, subtype, cartography.min_zoom AS min_zoom, cartography.max_zoom AS max_zoom, geometry",
+    ),
     "places": (
         "theme=places/type=place",
         "id, names.primary AS name, basic_category AS category, brand.names.primary AS brand, confidence, geometry",

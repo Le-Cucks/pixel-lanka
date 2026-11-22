@@ -88,7 +88,7 @@ def main():
                 chunks.setdefault(cell(g.x, g.y), {"buildings": [], "trees": []})["trees"] += [
                     round(g.x, 1), round(g.y, 1), round(2.2 + rnd(f["id"]) * 2.0, 1)]
 
-    ground = GroundLayers(con, args.area, frame)
+    ground = GroundLayers(frame, lambda layer: load(con, args.area, layer))
     written = []
     for i in range(nx):
         for j in range(ny):
