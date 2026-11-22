@@ -1,18 +1,18 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/addons/controls/MapControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { buildCity, Collider } from './city.js';
+import { groundPlane } from './city.js';
+import { ChunkManager } from './chunks.js';
 import { buildLotus } from './lotus.js';
 
-const AREA = new URLSearchParams(location.search).get('area') || 'colombo-fort';
+const AREA = new URLSearchParams(location.search).get('area') || 'colombo';
+const BASE = `data/${AREA}`;
 const EYE = 1.7;
 const PIXEL_SIZES = [1, 2, 3, 4];
 const $ = (id) => document.getElementById(id);
 
-const [data, groundTex] = await Promise.all([
-  fetch(`data/${AREA}/scene.json`).then((r) => r.json()),
-  new THREE.TextureLoader().loadAsync(`data/${AREA}/ground.png`),
-]);
+const manifest = await fetch(`${BASE}/manifest.json`).then((r) => r.json());
+const overviewTex = await new THREE.TextureLoader().loadAsync(`${BASE}/${manifest.overview.file}`);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, logarithmicDepthBuffer: true });
 renderer.shadowMap.enabled = true;
@@ -31,18 +31,21 @@ sun.shadow.mapSize.set(4096, 4096);
 scene.add(sun, sun.target);
 const SUN_DIR = new THREE.Vector3(0.75, 1.0, -0.35).normalize();
 
-scene.add(buildCity(data, groundTex));
-const collider = new Collider(data);
-const lotus = buildLotus(data.featured.find((f) => f.kind === 'lotus'));
+const ocean = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), new THREE.MeshLambertMaterial({ color: manifest.ocean }));
+ocean.rotation.x = -Math.PI / 2;
+ocean.position.y = -0.4;
+scene.add(ocean, groundPlane(manifest.bounds, overviewTex, -0.15));
+const chunks = new ChunkManager(scene, BASE, manifest);
+const lotus = buildLotus(manifest.featured.find((f) => f.kind === 'lotus'));
 scene.add(lotus.group);
 
 const controls = new MapControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 15;
-controls.maxDistance = 6000;
-controls.target.set(0, 0, 0);
-camera.position.set(-900, 1000, 900);
+controls.maxDistance = 12000;
+controls.target.set(lotus.center.x - 300, 0, lotus.center.z - 200);
+camera.position.set(controls.target.x - 900, 1000, controls.target.z + 900);
 
 const look = new PointerLockControls(camera, document.body);
 let mode = 'fly';
@@ -62,7 +65,9 @@ resize();
 
 function blocked(x, z) {
   if (level === 'deck' || lotus.contains(x, z)) return lotus.blocked(x, z, level);
-  return collider.hit(x, z);
+  const [x0, y0, x1, y1] = manifest.bounds;
+  if (x < x0 || x > x1 || -z < y0 || -z > y1) return true;
+  return chunks.hit(x, z);
 }
 
 function findFree(x, z) {
@@ -111,8 +116,6 @@ function enterFly() {
   controls.target.set(player.x, 0, player.z);
   camera.position.set(player.x - 140, 170, player.z + 140);
   level = 'ground';
-  scene.fog.near = 2500;
-  scene.fog.far = 9000;
   pixel = 3;
   resize();
   $('help-fly').hidden = false;
@@ -191,6 +194,22 @@ function updateSun() {
   sun.shadow.bias = -0.0002;
 }
 
+let lastStream = 0;
+function stream(now) {
+  if (now - lastStream < 250) return;
+  lastStream = now;
+  if (mode === 'walk') {
+    chunks.update(player.x, player.z, level === 'deck' ? 2200 : 900);
+  } else {
+    const d = camera.position.distanceTo(controls.target);
+    chunks.update(controls.target.x, controls.target.z, THREE.MathUtils.clamp(d * 1.6, 700, 3200));
+    scene.fog.near = Math.max(1500, d * 1.5);
+    scene.fog.far = Math.max(6000, d * 4);
+  }
+  const st = chunks.stats;
+  $('status').textContent = st.loading ? `Loading map… ${st.ready} chunks ready` : `${st.ready} of ${st.total} chunks in view`;
+}
+
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -198,8 +217,9 @@ renderer.setAnimationLoop(() => {
   else walkStep(dt);
   updateSun();
   updatePrompt();
+  stream(performance.now());
   renderer.render(scene, camera);
   $('loading').hidden = true;
 });
 
-window.pixelLanka = { camera, controls, enterWalk, enterFly, lotus, act, player, get mode() { return mode; }, get level() { return level; } };
+window.pixelLanka = { chunks, camera, controls, enterWalk, enterFly, lotus, act, player, get mode() { return mode; }, get level() { return level; } };

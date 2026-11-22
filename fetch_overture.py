@@ -10,6 +10,7 @@ BASE = f"s3://overturemaps-us-west-2/release/{RELEASE}"
 
 AREAS = {
     "colombo-fort": (79.838, 6.924, 79.861, 6.944),
+    "colombo": (79.835, 6.860, 79.900, 6.985),
 }
 
 LAYERS = {
