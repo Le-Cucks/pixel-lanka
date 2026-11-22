@@ -39,7 +39,7 @@ from render import (C, P, SHADOW, ZK, GroundLayers, Iso, building_height, buildi
 TILE = 256
 REGION = 4096
 MAX_H = 360
-FETCH_MARGIN = 900  # metres: tall buildings south of a region still poke up into it
+FETCH_MARGIN = 300  # metres: buildings just south of a region still poke up into it (landmarks are drawn separately)
 FRAME = AREAS["sri-lanka"]
 OUT = Path("site/public/tiles")
 FEATURED = {"Colombo Lotus Tower": "lotus"}
@@ -47,7 +47,7 @@ LOTUS_TOP = 352
 BUD = [(7, 226), (14, 236), (21, 248), (23, 258), (22, 266), (17, 277), (9, 287), (3, 293), (0.5, 297)]
 
 MAPS = {
-    "island": dict(area="sri-lanka", px=0.5, overlay=False, min_confidence=0.8),
+    "island": dict(area="sri-lanka", px=0.5, overlay=False, min_confidence=0.8, region=2048),
     "colombo": dict(area="colombo", px=2.0, overlay=True, min_confidence=0.6),
 }
 
@@ -155,7 +155,8 @@ def build_index(area):
 
 class Source:
     def __init__(self, area):
-        self.con = duckdb.connect(str(index_path(area)), read_only=True)
+        self.con = duckdb.connect(str(index_path(area)), read_only=True,
+                                  config={"memory_limit": "1GB", "threads": 2})  # one per worker: keep each small
         self.con.execute("LOAD spatial")
         self.tables = {r[0] for r in self.con.execute("SELECT table_name FROM information_schema.tables").fetchall()}
 
@@ -396,11 +397,13 @@ def main():
     top = files / str(levels - 1)
     top.mkdir(parents=True)
     store.mkdir()
-    jobs = [(rx, ry, min(REGION, W_ - rx), min(REGION, H_ - ry), str(top), str(store))
-            for ry in range(0, H_, REGION) for rx in range(0, W_, REGION)]
+    R = cfg.get("region", REGION)  # dense low-zoom maps need smaller regions to bound worker memory
+    jobs = [(rx, ry, min(R, W_ - rx), min(R, H_ - ry), str(top), str(store))
+            for ry in range(0, H_, R) for rx in range(0, W_, R)]
     print(f"{args.map}: {W_}x{H_}px, {len(jobs)} regions, {levels} levels, {args.workers} workers", flush=True)
 
-    with get_context("spawn").Pool(args.workers, initializer=init_worker, initargs=(args.map, featured)) as pool:
+    with get_context("spawn").Pool(args.workers, initializer=init_worker, initargs=(args.map, featured),
+                                     maxtasksperchild=100) as pool:
         for i, _ in enumerate(pool.imap_unordered(region_task, jobs), 1):
             if i % max(1, len(jobs) // 20) == 0 or i == len(jobs):
                 print(f"  regions {i}/{len(jobs)} ({time.time() - t0:.0f}s)", flush=True)

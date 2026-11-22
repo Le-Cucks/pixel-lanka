@@ -7,11 +7,12 @@ export type Place = [name: string, category: string, lon: number, lat: number, s
 
 type Props = {
   placesUrls: string[];
+  extra?: Place[]; // curated entries ranked above everything else
   onPlace: (p: Place) => void;
   onLatLon: (lat: number, lon: number) => void;
 };
 
-export default function Search({ placesUrls, onPlace, onLatLon }: Props) {
+export default function Search({ placesUrls, extra = [], onPlace, onLatLon }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [places, setPlaces] = useState<Place[] | null>(null);
   const [q, setQ] = useState('');
@@ -38,7 +39,7 @@ export default function Search({ placesUrls, onPlace, onLatLon }: Props) {
         const key = `${p[0].toLowerCase()}|${p[2].toFixed(3)}|${p[3].toFixed(3)}`;
         if (!seen.has(key)) { seen.add(key); merged.push(p); }
       }
-      setPlaces(merged);
+      setPlaces([...extra, ...merged]);
     });
   };
 

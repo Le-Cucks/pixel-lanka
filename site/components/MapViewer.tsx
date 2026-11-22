@@ -4,6 +4,7 @@ import Link from 'next/link';
 import OpenSeadragon from 'openseadragon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { baseLayer, formatAt, inBounds, parseAt, placement, toImage, toLonLat, type MapLayer, type World } from '@/lib/geo';
+import { LandmarkCard, LandmarkStrip, type Landmark } from './Landmarks';
 import Search, { type Place } from './Search';
 
 const TILES = process.env.NEXT_PUBLIC_TILES_BASE ?? '/tiles';
@@ -15,6 +16,12 @@ export default function MapViewer() {
   const pin = useRef<HTMLDivElement | null>(null);
   const [world, setWorld] = useState<World | null>(null);
   const [toast, setToast] = useState('');
+  const [landmarks, setLandmarks] = useState<Landmark[]>([]);
+  const [selected, setSelected] = useState<Landmark | null>(null);
+
+  useEffect(() => {
+    fetch(`${TILES}/landmarks.json`).then((r) => (r.ok ? r.json() : [])).then(setLandmarks).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let v: OpenSeadragon.Viewer | undefined;
@@ -122,11 +129,20 @@ export default function MapViewer() {
       <div className="topright">
         <Search
           placesUrls={world ? Object.values(world.maps).map((m) => `${TILES}/${m.places}`) : []}
-          onPlace={(p: Place) => flyTo(p[2], p[3])}
+          extra={landmarks.flatMap((l) => [l.name, ...l.aliases].map((n): Place => [n, 'landmark', l.lon, l.lat, 2]))}
+          onPlace={(p: Place) => {
+            flyTo(p[2], p[3]);
+            setSelected(landmarks.find((l) => l.lon === p[2] && l.lat === p[3]) ?? null);
+          }}
           onLatLon={onLatLon}
         />
         <button className="chip share" onClick={share}>Share this view</button>
       </div>
+      {selected && <LandmarkCard tiles={TILES} landmark={selected} onClose={() => setSelected(null)} />}
+      {landmarks.length > 0 && (
+        <LandmarkStrip tiles={TILES} landmarks={landmarks} selected={selected?.id ?? null}
+          onPick={(l) => { setSelected(l); flyTo(l.lon, l.lat); }} />
+      )}
       <div className="credit chip">
         © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://overturemaps.org">Overture Maps</a> · Google Open Buildings · Microsoft · ESA WorldCover
       </div>
