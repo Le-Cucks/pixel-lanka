@@ -1,7 +1,7 @@
 [project]
 name = "pixel-lanka"
 version = "0.1.0"
-description = "Add your description here"
+description = "Isometric pixel-art maps of Sri Lanka from Overture/OSM data"
 authors = [
     { name = "Maneesha Cooray", email = "bmaneeshacooray@gmail.com" }
 ]
@@ -13,9 +13,3 @@ dependencies = [
     "shapely>=2.2.0",
 ]
 
-[project.scripts]
-pixel-lanka = "pixel_lanka:main"
-
-[build-system]
-requires = ["uv_build>=0.13.5,<0.14.0"]
-build-backend = "uv_build"
