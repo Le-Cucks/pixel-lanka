@@ -193,7 +193,7 @@ def draw_building(d, iso, poly, h, s):
         t = ((nx - ny) * C + 1) / 2
         col = mix(mul(s["wall"], 0.66), s["wall"], t)
         d.polygon([iso.xy(x1, y1), iso.xy(x2, y2), iso.xy(x2, y2, h), iso.xy(x1, y1, h)], fill=col)
-        if h < 5 or L < 2.5:
+        if h < 5 or L < 2.5 or s.get("nowin"):
             continue
         win = mix(mul(s["win"], 0.8), s["win"], t)
         n = int(L / 2.6)
