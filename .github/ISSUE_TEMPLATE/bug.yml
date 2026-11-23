@@ -1,0 +1,27 @@
+name: Bug report
+description: Something is drawn wrong, in the wrong place, or the site misbehaves
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong?
+      description: What did you see, and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link to the view
+      description: Copy the address bar (it contains `?at=lat,lon,zoom`) or use "Share this view".
+      placeholder: https://…/?at=6.92860,79.85989,40.00
+  - type: textarea
+    id: env
+    attributes:
+      label: Device and browser
+      placeholder: e.g. iPhone 15, Safari 26
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Drag an image here if it helps.

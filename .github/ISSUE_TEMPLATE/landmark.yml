@@ -1,0 +1,28 @@
+name: Landmark suggestion or correction
+description: Suggest a landmark card, or fix a name, translation or description
+labels: [landmark]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Landmark (English name)
+    validations:
+      required: true
+  - type: input
+    id: si
+    attributes:
+      label: Sinhala name
+  - type: input
+    id: ta
+    attributes:
+      label: Tamil name
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: A `?at=` link from the map, or latitude, longitude.
+  - type: textarea
+    id: details
+    attributes:
+      label: Description or correction
+      description: One or two sentences on why it matters, or what's wrong with the current card.

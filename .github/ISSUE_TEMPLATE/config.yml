@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A building, road or name is wrong in the data
+    url: https://www.openstreetmap.org/fixthemap
+    about: Map data comes from OpenStreetMap via Overture. Fixing it there fixes it here after the next data refresh.
