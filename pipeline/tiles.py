@@ -32,16 +32,32 @@ from shapely.affinity import translate
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
-from fetch_overture import AREAS, LAYERS
-from render import (C, P, SHADOW, ZK, GroundLayers, Iso, building_height, building_style, draw_building,
-                    draw_ground, draw_tree, fill, hexc, mix, mul, polys)
+from fetch_overture import AREAS, DATA, LAYERS, ROOT, TILES
+from render import (
+    SHADOW,
+    ZK,
+    C,
+    GroundLayers,
+    Iso,
+    P,
+    building_height,
+    building_style,
+    draw_building,
+    draw_ground,
+    draw_tree,
+    fill,
+    hexc,
+    mix,
+    mul,
+    polys,
+)
 
 TILE = 256
 REGION = 4096
 MAX_H = 360
 FETCH_MARGIN = 300  # metres: buildings just south of a region still poke up into it (landmarks are drawn separately)
 FRAME = AREAS["sri-lanka"]
-OUT = Path("site/public/tiles")
+OUT = TILES
 FEATURED = {"Colombo Lotus Tower": "lotus"}
 LOTUS_TOP = 352
 BUD = [(7, 226), (14, 236), (21, 248), (23, 258), (22, 266), (17, 277), (9, 287), (3, 293), (0.5, 297)]
@@ -138,7 +154,7 @@ def draw_lotus(d, iso, cx, cy):
 # ---------- data access ----------
 
 def index_path(area):
-    return Path(f"data/{area}/index.duckdb")
+    return DATA / area / "index.duckdb"
 
 
 def build_index(area):
@@ -150,7 +166,7 @@ def build_index(area):
     con = duckdb.connect(str(tmp))
     con.execute("LOAD spatial")
     for layer in LAYERS:
-        src = Path(f"data/{area}/{layer}.parquet")
+        src = DATA / area / f"{layer}.parquet"
         if src.exists():
             con.execute(f"CREATE TABLE {layer} AS SELECT * FROM '{src}'")
             con.execute(f"CREATE INDEX {layer}_rtree ON {layer} USING RTREE (geometry)")
@@ -380,7 +396,7 @@ def parent_task(job):
                 if (col * 2 + dc) * TILE < cw and (row * 2 + dr) * TILE < ch]
         out = files / str(lv) / f"{col}_{row}.webp"
 
-        def compose(crop=True):
+        def compose(crop=True, kids=kids, tw=tw, th=th, x0=x0, y0=y0):
             canvas = Image.new(mode, (TILE * 2, TILE * 2), bg)
             for dc, dr, path in kids:
                 canvas.paste(Image.open(path).convert(mode), (dc * TILE, dr * TILE))
@@ -484,7 +500,7 @@ def main():
     if lotus and cfg["px"] >= 1:
         init_worker(args.map, featured)
         sx, sy = iso.xy(lotus["x"], lotus["y"], 176)
-        render_region(round(sx) - 600, round(sy) - 315, 1200, 630).save("site/app/opengraph-image.png", optimize=True)
+        render_region(round(sx) - 600, round(sy) - 315, 1200, 630).save(ROOT / "site" / "app" / "opengraph-image.png", optimize=True)
         lon, lat = iso.to_ll(*unproject(iso, *iso.xy(lotus["x"], lotus["y"], 150)))
         entry["start"] = dict(lon=round(lon, 6), lat=round(lat, 6))
 

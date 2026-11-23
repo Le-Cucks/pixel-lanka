@@ -3,19 +3,18 @@
 import argparse
 import hashlib
 import math
-from pathlib import Path
 
 import duckdb
 import numpy as np
-from PIL import Image, ImageDraw
 import shapely
+from PIL import Image, ImageDraw
 from shapely import STRtree, wkb
 from shapely.affinity import translate
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-from fetch_overture import AREAS
+from fetch_overture import AREAS, DATA, ROOT
 
 C = math.sqrt(0.5)
 ZK = 0.82  # screen height per metre of elevation, relative to ground scale
@@ -136,10 +135,10 @@ class TopDown(Frame):
 
 
 def load(con, area, layer):
-    if not Path(f"data/{area}/{layer}.parquet").exists():
+    src = DATA / area / f"{layer}.parquet"
+    if not src.exists():
         return
-    cur = con.execute(
-        f"SELECT * EXCLUDE geometry, ST_AsWKB(geometry) AS g FROM 'data/{area}/{layer}.parquet'")
+    cur = con.execute(f"SELECT * EXCLUDE geometry, ST_AsWKB(geometry) AS g FROM '{src}'")
     cols = [d[0] for d in cur.description]
     for row in cur.fetchall():
         d = dict(zip(cols, row))
@@ -385,7 +384,7 @@ def main():
     ap.add_argument("--px", type=float, default=2.0, help="pixels per metre")
     args = ap.parse_args()
     img = render(args.area, args.px)
-    out = Path("out")
+    out = ROOT / "out"
     out.mkdir(exist_ok=True)
     path = out / f"{args.area}.png"
     img.save(path, optimize=True)

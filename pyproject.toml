@@ -13,3 +13,24 @@ dependencies = [
     "shapely>=2.2.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]
+
+
+[tool.uv]
+package = false  # a set of scripts, not an installable package
+
+[tool.pytest.ini_options]
+pythonpath = ["pipeline"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
+src = ["pipeline", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = ["B905"]  # zip(ring, ring[1:]) pairs are deliberately uneven

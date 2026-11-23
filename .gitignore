@@ -1,4 +1,14 @@
+# generated map data and renders (gigabytes, rebuilt by `make data` / `make tiles`)
 data/
 out/
+
+# python
 .venv/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/
