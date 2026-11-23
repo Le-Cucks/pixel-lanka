@@ -6,8 +6,9 @@ site/public/tiles/landmarks/<id>.webp
 
 import json
 import math
+
 from fetch_overture import AREAS
-from tiles import MAPS, OUT, W, Source, init_worker, make_iso, render_region
+from tiles import MAPS, OUT, Source, W, init_worker, make_iso, render_region
 
 # (id, name, Sinhala, Tamil, approx lon, approx lat, name pattern to snap to, aliases, blurb)
 LANDMARKS = [

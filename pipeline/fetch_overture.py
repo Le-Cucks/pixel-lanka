@@ -5,6 +5,10 @@ from pathlib import Path
 
 import duckdb
 
+ROOT = Path(__file__).resolve().parent.parent  # repo root: paths work from any working directory
+DATA = ROOT / "data"
+TILES = ROOT / "site" / "public" / "tiles"
+
 RELEASE = "2026-11-18.0"
 BASE = f"s3://overturemaps-us-west-2/release/{RELEASE}"
 
@@ -46,7 +50,7 @@ def main():
     ap.add_argument("area", choices=AREAS)
     args = ap.parse_args()
     xmin, ymin, xmax, ymax = AREAS[args.area]
-    out = Path("data") / args.area
+    out = DATA / args.area
     out.mkdir(parents=True, exist_ok=True)
 
     con = duckdb.connect()
