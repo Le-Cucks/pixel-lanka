@@ -2,12 +2,14 @@
 
 **All of Sri Lanka as one explorable isometric pixel-art map**, built from open map data. Colombo is drawn in full detail, and you can pan, zoom and search the whole island and jump to its landmarks.
 
+**Live: https://le-cucks.github.io/pixel-lanka/**
+
 <p align="center">
   <img src="docs/images/island.webp" alt="The whole island of Sri Lanka as an isometric pixel-art map" width="49%">
   <img src="docs/images/colombo.webp" alt="Colombo in detail, centred on the Lotus Tower" width="49%">
 </p>
 
-[![CI](https://github.com/Le-Cucks/pixel-lanka/actions/workflows/ci.yml/badge.svg)](https://github.com/Le-Cucks/pixel-lanka/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Le-Cucks/pixel-lanka/actions/workflows/deploy.yml/badge.svg)](https://github.com/Le-Cucks/pixel-lanka/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](LICENSE)
 [![Map data: ODbL](https://img.shields.io/badge/map%20data-ODbL-green.svg)](#data-and-licensing)
 
@@ -85,10 +87,19 @@ NEXT_PUBLIC_TILES_BASE=https://tiles.example.com make dev
 
 ## Deployment
 
-The app is a small static Next.js site (about 260 KB of JS). The tiles are the bulk, and they shouldn't be bundled into the app deployment:
+The site is a fully static Next.js export (about 1.5 MB), deployed to **GitHub Pages** by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
 
-1. Upload `site/public/tiles/` to object storage with a CDN, for example Cloudflare R2. Because blank tiles are hard-linked, upload with a tool that follows links (e.g. `rclone copy`). Serve `.webp` as `image/webp` with long cache headers and allow CORS from your site's origin.
-2. Deploy `site/` (Vercel, Cloudflare, or any Node/static host) with `NEXT_PUBLIC_TILES_BASE` set to the tile URL and `NEXT_PUBLIC_SITE_URL` set to the public site URL (used for social preview links).
+- **Every push to `main`** runs CI (ruff, pytest, eslint, TypeScript), then builds the static site and publishes it. Pull requests run CI only.
+- **Run it by hand**: Actions → *Deploy to GitHub Pages* → *Run workflow*.
+- **The sub-path is handled for you.** The workflow sets `NEXT_PUBLIC_BASE_PATH` from the Pages config (`/pixel-lanka`, or empty if you add a custom domain).
+
+**Tiles are hosted separately.** At about 1.9 GB and 650k files they're over GitHub Pages' 1 GB site limit, and they aren't in git. Upload `site/public/tiles/` to object storage with a CDN (e.g. Cloudflare R2):
+
+- Use a tool that follows hard links (`rclone copy`), since blank sea tiles are hard-linked.
+- Serve `.webp` as `image/webp` with long cache headers.
+- Allow CORS from `https://le-cucks.github.io`.
+
+Then set the repository variable **`TILES_BASE_URL`** (Settings → Secrets and variables → Actions → Variables) to the tile URL, e.g. `https://tiles.example.com`, and re-run the deploy.
 
 ## Data and licensing
 

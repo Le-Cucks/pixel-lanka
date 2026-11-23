@@ -7,7 +7,8 @@ import { baseLayer, formatAt, inBounds, parseAt, placement, toImage, toLonLat, t
 import { LandmarkCard, LandmarkStrip, type Landmark } from './Landmarks';
 import Search, { type Place } from './Search';
 
-const TILES = process.env.NEXT_PUBLIC_TILES_BASE ?? '/tiles';
+// Tiles may live on another host (they are too big for most static hosts); fetch() doesn't add basePath itself.
+const TILES = process.env.NEXT_PUBLIC_TILES_BASE || `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/tiles`;
 // With several images open, viewport-level conversions are inaccurate; convert through the base image.
 function baseItem(v: OpenSeadragon.Viewer, base: MapLayer) {
   for (let i = 0; i < v.world.getItemCount(); i++) {

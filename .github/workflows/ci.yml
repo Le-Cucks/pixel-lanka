@@ -1,13 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call: # main is checked by deploy.yml, which runs this first and only deploys if it passes
 
 permissions:
   contents: read

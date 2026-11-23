@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deployment at a time; never cancel one that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build static site
+    needs: ci
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v5
+      - id: pages
+        uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - name: Check the tile host is configured
+        if: vars.TILES_BASE_URL == ''
+        run: echo "::warning title=No tile host::Set the TILES_BASE_URL repository variable (Settings → Secrets and variables → Actions → Variables). Without it the site deploys but the map has no tiles."
+      - run: npm run build
+        env:
+          # e.g. /pixel-lanka on <org>.github.io, empty with a custom domain
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # origin only: Next adds the base path to metadata URLs itself
+          NEXT_PUBLIC_SITE_URL: ${{ steps.pages.outputs.origin }}
+          NEXT_PUBLIC_TILES_BASE: ${{ vars.TILES_BASE_URL }}
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/out
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

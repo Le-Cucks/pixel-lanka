@@ -7,13 +7,14 @@ npm ci
 npm run dev        # http://localhost:3000
 npm run lint
 npm run typecheck
-npm run build
+npm run build      # static export into out/
 ```
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NEXT_PUBLIC_TILES_BASE` | `/tiles` | Where `world.json`, `landmarks.json` and the tile pyramids are served from |
-| `NEXT_PUBLIC_SITE_URL` | — | Public URL of the site, used for social preview (Open Graph) links |
+| `NEXT_PUBLIC_TILES_BASE` | `<basePath>/tiles` | Where `world.json`, `landmarks.json` and the tile pyramids are served from |
+| `NEXT_PUBLIC_BASE_PATH` | — | Sub-path the site is served from, e.g. `/pixel-lanka` on GitHub Pages (set by the deploy workflow) |
+| `NEXT_PUBLIC_SITE_URL` | — | Origin of the public site (no path), used for social preview (Open Graph) links |
 
 Layout:
 
