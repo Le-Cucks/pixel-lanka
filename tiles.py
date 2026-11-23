@@ -46,6 +46,11 @@ FEATURED = {"Colombo Lotus Tower": "lotus"}
 LOTUS_TOP = 352
 BUD = [(7, 226), (14, 236), (21, 248), (23, 258), (22, 266), (17, 277), (9, 287), (3, 293), (0.5, 297)]
 
+# Base maps dissolve into the background at the frame edge instead of ending in a hard line.
+# Sea fades over a wide band; anything else (land cut by the frame, e.g. India) only in the outermost strip,
+# so a coast near the edge (Point Pedro is 2.7 km from it) stays crisp.
+FADE_SEA, FADE_LAND = 10000, 1500  # metres
+
 MAPS = {
     "island": dict(area="sri-lanka", px=0.5, overlay=False, min_confidence=0.8, region=2048),
     "colombo": dict(area="colombo", px=2.0, overlay=True, min_confidence=0.6),
@@ -284,16 +289,70 @@ def save_tile(img, path, store):
     img.save(path, format="WEBP", lossless=True, method=4)
 
 
+def edge_distance(iso, rx, ry, w, h):
+    """Ground distance in metres from each pixel centre to the map frame edge (negative outside)."""
+    sx = np.arange(w) + rx + 0.5
+    sy = np.arange(h)[:, None] + ry + 0.5
+    a = (sx + iso.ox) / (C * iso.px)
+    b = -(sy + iso.oy) / (0.5 * C * iso.px)
+    e, n = (a + b) / 2, (b - a) / 2
+    e0, n0, e1, n1 = iso.clip.bounds
+    return np.minimum(np.minimum(e - e0, e1 - e), np.minimum(n - n0, n1 - n))
+
+
+def near_edge(iso, rx, ry, w, h):
+    # distance is a minimum of linear functions, so over a rectangle its minimum is at a corner
+    corners = [edge_distance(iso, x, y, 1, 1)[0, 0] for x in (rx, rx + w) for y in (ry, ry + h)]
+    return min(corners) < FADE_SEA and max(corners) > -2 * TILE / iso.px
+
+
+def fade_edges(iso, img, rx, ry):
+    w, h = img.size
+    if not near_edge(iso, rx, ry, w, h):
+        return img
+    a = np.asarray(img).astype(np.float32)
+    d = edge_distance(iso, rx, ry, w, h)
+    rgb = a.astype(np.uint32)
+    sea = np.isin((rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2], SIMPLE[1:])
+    t = np.clip(d / np.where(sea, FADE_SEA, FADE_LAND), 0, 1)
+    t = (1 - (1 - t) ** 2)[..., None]  # ease-out: stays blue near the coast, darkens mostly at the very edge
+    bg = np.array(P["bg"], np.float32)
+    return Image.fromarray(np.round(bg + (a - bg) * t).astype(np.uint8))
+
+
 def region_task(job):
     rx, ry, w, h, top, store = job
     img = render_region(rx, ry, w, h)
     if W["cfg"]["overlay"]:
         img = with_alpha(img)
+    else:
+        img = fade_edges(W["iso"], img, rx, ry)
     for tx in range(0, w, TILE):
         for ty in range(0, h, TILE):
             save_tile(img.crop((tx, ty, min(tx + TILE, w), min(ty + TILE, h))),
                       Path(top) / f"{(rx + tx) // TILE}_{(ry + ty) // TILE}.webp", Path(store))
     return rx, ry
+
+
+def fade_column(job):
+    """Apply the edge fade to already-rendered top-level tiles in one column (for maps rendered before it existed)."""
+    top, store, col, rows = job
+    top, store, iso = Path(top), Path(store), W["iso"]
+    changed = 0
+    for row in range(rows):
+        path = top / f"{col}_{row}.webp"
+        if not path.exists():
+            continue
+        img = Image.open(path).convert("RGB")
+        if not near_edge(iso, col * TILE, row * TILE, *img.size):
+            continue
+        faded = fade_edges(iso, img, col * TILE, row * TILE)
+        if np.array_equal(np.asarray(faded), np.asarray(img)):
+            continue
+        path.unlink()  # the file may be a hard link shared with every other plain-sea tile: never write through it
+        save_tile(faded, path, store)
+        changed += 1
+    return changed
 
 
 # ---------- pyramid ----------
@@ -380,9 +439,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("map", choices=MAPS)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    ap.add_argument("--fade-only", action="store_true", help="fade the edges of an existing base map, rebuild its pyramid")
     args = ap.parse_args()
     cfg = MAPS[args.map]
     t0 = time.time()
+    if args.fade_only:
+        return fade_existing(args, cfg, t0)
 
     build_index(cfg["area"])
     iso = make_iso(cfg)
@@ -433,6 +495,30 @@ def main():
     world_path.write_text(json.dumps(world, indent=1))
     n = sum(1 for _ in files.rglob("*.webp"))
     print(f"done in {time.time() - t0:.0f}s: {n} tiles, {len(places)} searchable places")
+
+
+def fade_existing(args, cfg, t0):
+    assert not cfg["overlay"], "only base maps are faded"
+    iso = make_iso(cfg)
+    out = OUT / args.map
+    files, store = out / f"{args.map}_files", out / "_store"
+    marker = out / ".faded"
+    if marker.exists():
+        raise SystemExit(f"{args.map} is already faded; re-render it to change the fade")
+    levels = math.ceil(math.log2(max(iso.w, iso.h))) + 1
+    top = files / str(levels - 1)
+    cols, rows = math.ceil(iso.w / TILE), math.ceil(iso.h / TILE)
+    with get_context("spawn").Pool(args.workers, initializer=init_worker, initargs=(args.map, []),
+                                     maxtasksperchild=200) as pool:
+        changed = sum(pool.imap_unordered(fade_column, [(str(top), str(store), c, rows) for c in range(cols)], chunksize=8))
+        print(f"  faded {changed} edge tiles ({time.time() - t0:.0f}s)", flush=True)
+        for lv in range(levels - 1):
+            shutil.rmtree(files / str(lv))
+        for f in store.glob("parent-*.webp"):  # keyed by inode, which may since have been reused
+            f.unlink()
+        build_pyramid(pool, files, store, iso.w, iso.h, False)
+    marker.touch()
+    print(f"done in {time.time() - t0:.0f}s")
 
 
 if __name__ == "__main__":
