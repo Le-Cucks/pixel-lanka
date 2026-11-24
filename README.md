@@ -116,4 +116,3 @@ Bug reports, landmark suggestions and pull requests are welcome. See [CONTRIBUTI
 - Terrain, so Sigiriya, Sri Pada and the hill country stand up
 - Better building heights (e.g. Google Open Buildings 2.5D)
 - Sponsored landmark highlights
-- Public deployment
