@@ -7,6 +7,13 @@ updates:
     groups:
       next-react:
         patterns: ["next", "eslint-config-next", "react", "react-dom", "@types/react", "@types/react-dom"]
+    ignore:
+      # match the Node 22 runtime used in CI
+      - dependency-name: "@types/node"
+        versions: [">=23"]
+      # typescript-eslint does not support TypeScript 7 yet
+      - dependency-name: typescript
+        versions: [">=7"]
   - package-ecosystem: uv
     directory: /
     schedule:
