@@ -3,7 +3,7 @@ name = "pixel-lanka"
 version = "0.1.0"
 description = "Isometric pixel-art maps of Sri Lanka from Overture/OSM data"
 authors = [
-    { name = "Maneesha Cooray", email = "bmaneeshacooray@gmail.com" }
+    { name = "Maneesha Cooray" }
 ]
 requires-python = ">=3.12"
 dependencies = [
