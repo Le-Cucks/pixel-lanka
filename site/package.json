@@ -16,7 +16,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "@types/openseadragon": "^5.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
